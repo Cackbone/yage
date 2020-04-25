@@ -1,103 +1,128 @@
-extern crate proc_macro;
-extern crate syn;
-
 use proc_macro::TokenStream;
+use syn::{ ItemEnum, Variant, Fields, Attribute,
+           Token, token::{ Comma },
+           TypeTuple, LitInt, Result,
+           parse_macro_input, parse::{Parse, ParseStream}};
 use quote::quote;
-use syn::parse::{Parse, ParseStream};
-use syn::{parse_macro_input, ExprArray, LitInt, Result, Token};
 
-mod kw {
+// mod opcode;
+// use opcode::Opcode;
+
+mod yage_kw {
     syn::custom_keyword!(opcode);
-    syn::custom_keyword!(regs);
-    syn::custom_keyword!(lenght);
-    syn::custom_keyword!(cycles);
-    syn::custom_keyword!(flags);
+    syn::custom_keyword!(args);
 }
 
-enum Argument {
-    Opcode {
-        opcode_token: kw::opcode,
-        eq_token: Token![=],
-        value: LitInt,
-    },
-    Regs {
-        regs_token: kw::regs,
-        eq_token: Token![=],
-        value: ExprArray,
-    },
-    Lenght {
-        lenght_token: kw::lenght,
-        eq_token: Token![=],
-        value: LitInt,
-    },
-    Cycles {
-        cycles_token: kw::cycles,
-        eq_token: Token![=],
-        value: LitInt,
-    },
-    Flags {
-        flags_token: kw::flags,
-        eq_token: Token![=],
-        value: ExprArray,
-    },
+struct Op {
+    name: yage_kw::opcode,
+    eq_token: Token![=],
+    value: LitInt
 }
-impl Parse for Argument {
+
+struct Args {
+    name: yage_kw::args,
+    eq_token: Token![=],
+    args: TypeTuple
+}
+
+struct Bind {
+    opcode: Op,
+    comma_token: Comma,
+    args: Args
+}
+
+
+impl Parse for Bind {
     fn parse(input: ParseStream) -> Result<Self> {
-        let lookahead = input.lookahead1();
-        if lookahead.peek(kw::opcode) {
-            Ok(Argument::Opcode {
-                opcode_token: input.parse::<kw::opcode>()?,
-                eq_token: input.parse()?,
-                value: input.parse()?,
-            })
-        } else if lookahead.peek(kw::regs) {
-            Ok(Argument::Regs {
-                regs_token: input.parse::<kw::regs>()?,
-                eq_token: input.parse()?,
-                value: input.parse()?,
-            })
-        } else if lookahead.peek(kw::lenght) {
-            Ok(Argument::Lenght {
-                lenght_token: input.parse::<kw::lenght>()?,
-                eq_token: input.parse()?,
-                value: input.parse()?,
-            })
-        } else if lookahead.peek(kw::cycles) {
-            Ok(Argument::Cycles {
-                cycles_token: input.parse::<kw::cycles>()?,
-                eq_token: input.parse()?,
-                value: input.parse()?,
-            })
-        } else if lookahead.peek(kw::flags) {
-            Ok(Argument::Flags {
-                flags_token: input.parse::<kw::flags>()?,
-                eq_token: input.parse()?,
-                value: input.parse()?,
-            })
-        } else {
-            Err(lookahead.error())
-        }
+        Ok(Bind {
+            opcode: input.parse()?,
+            comma_token: input.parse()?,
+            args: input.parse()?
+        })
     }
 }
-/// #[declare_instruction(opcode=0xff, regs=[], lenght=2, cycles=8, flags=[]])
-#[proc_macro_attribute]
-pub fn declare_instruction(args: TokenStream, item: TokenStream) -> TokenStream {
-    let args = parse_macro_input!(args as Argument);
-    impl_declare_instruction(args, item)
+
+impl Parse for Op {
+    fn parse(input: ParseStream) -> Result<Self> {
+        Ok(Op {
+            name: input.parse()?,
+            eq_token: input.parse()?,
+            value: input.parse()?
+        })
+    }
 }
 
-fn impl_declare_instruction(arguments: Argument, item: TokenStream) -> TokenStream {
-    let typename = quote! {item.to_string()};
-    let args = quote! {arguments};
-    let generated = quote! {
-        pub struct #typename {
-            opcode: #args.opcode.value,
-            regs: #args.regs.value,
-            lenght: #args.lenght.value,
-            cycles: #args.cycles.value,
-            flags:  #args.flags.value,
+impl Parse for Args {
+    fn parse(input: ParseStream) -> Result<Self> {
+        Ok(Args {
+            name: input.parse()?,
+            eq_token: input.parse()?,
+            args: input.parse()?
+        })
+    }
+}
+
+
+#[proc_macro_derive(YageInstructions, attributes(bind))]
+pub fn instructions(input: TokenStream) -> TokenStream {
+    let enumItem: ItemEnum = syn::parse(input).expect("Instructions derive only works on enums");
+    let enumName = &enumItem.ident;
+    let mut structs = Vec::new();
+
+    for variant in &enumItem.variants {
+        let vStruct = create_struct(variant);
+        let bindings = parse_bindings(&variant.attrs);
+
+        structs.push(vStruct);
+    }
+
+    TokenStream::from(quote! {
+        #(#structs)*
+    })
+}
+
+
+fn create_struct(variant: &Variant) -> proc_macro2::TokenStream {
+    let name = &variant.ident;
+    let variant_struct = match &variant.fields {
+        Fields::Unnamed(fields) => {
+            quote! {
+                struct #name(#fields);
+            }
+        },
+        Fields::Unit => {
+            quote! {
+                struct #name;
+            }
+        },
+        Fields::Named(_) => {
+            panic!("Named field are not supported in Instructions derive");
         }
     };
 
-    TokenStream::from(generated)
+    return variant_struct;
+}
+
+
+fn parse_bindings(attrs: &Vec<Attribute>) -> Vec<Bind> {
+    let mut bindings = Vec::new();
+
+    for attr in attrs {
+        let path = match attr.path.get_ident() {
+            Some(ident) => ident.to_string(),
+            None => continue
+        };
+
+        match path.as_str() {
+            "bind" => {
+                let bind: Bind = attr.parse_args().unwrap();
+
+                bindings.push(bind);
+            },
+
+            _ => ()
+        }
+    }
+
+    bindings
 }
