@@ -3,28 +3,20 @@
 This is a lib which aimed to give a convinent way to add instruction with a simple synthax
 
 # macro synthax
-`#[declare_instruction(opcode=0xff, regs=[], lenght=2, cycles=8, flags=[])]`
+`#[bind(opcodes=(0x80, 0x01, 0x01), args=(RegisterA, nn))]`
 
 
-# Usage 
+# Usage
 Here is a example of usage:
 ```Rust
+#[derive(YageInstructions)]
 enum instructions {
-	#[declare_instruction(opcode=0x00, regs=[], lenght=1, cycles=4, flags=[])]
-	NOP
+	#[bind(opcodes=(0x00), args=())]
+	NOP,
+
+    #[bind(opcodes=(0x81, 0x01, 0x01), args=(n, n)]
+    #[bind(opcodes=(0x80, 0x01, 0x02), args=(RegisterB, nn)]
+    JP(Register, u16)
 }
 ```
 
-This sample will generate the following struct
-
-```Rust
-pub struct NOP {
-	opcode: 0x00,
-	regs: [],
-	lenght: 1,
-	cycles: 4,
-	flags: [],
-}
-```
-
-For now, this is very experimental
